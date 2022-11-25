@@ -6,6 +6,19 @@ import smtplib
 import json
 
 
+class DummyEmailSender(object):
+    def __init__(self):
+        print("Building dummy email sender")
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, type, value, traceback):
+        pass
+
+    def send_mail(self, recipient, subject, body):
+        print(("Sending mail to %s with subject %s and body %s")%(recipient, subject, body))
+
 class EmailSender(object):
     def __init__(self, server_hostname, server_port=25, user=None, password=None, use_starttls=True, from_email=None, from_name=None):
         self.server_hostname = server_hostname
@@ -19,11 +32,9 @@ class EmailSender(object):
 
     def __enter__(self):
         self.server = self.open_smtp_connection()
-        pass
 
     def __exit__(self, type, value, traceback):
         self.server = self.close_smtp_connection()
-        pass
 
     def open_smtp_connection(self):
         server = smtplib.SMTP(self.server_hostname, self.server_port)
@@ -65,6 +76,7 @@ class SecretSanta(object):
                             default="participants.json")
         parser.add_argument("-t", "--template", help="Email template file. Refer to README for help",
                             default="template.txt")
+        parser.add_argument("-n", "--dry_run", help="Dry run", default=False)
         return parser.parse_args()
 
     def read_config(self):
@@ -79,8 +91,11 @@ class SecretSanta(object):
             use_starttls = True # crypto by default!
         from_email = config['from']['email']
         from_name = config['from']['name']
-        self.email_sender = EmailSender(server_hostname, server_port=server_port, user=user, password=password,
-                                        use_starttls=use_starttls, from_email=from_email, from_name=from_name)
+        if self.args.dry_run:
+            self.email_sender = DummyEmailSender()
+        else:
+            self.email_sender = EmailSender(server_hostname, server_port=server_port, user=user, password=password,
+                                            use_starttls=use_starttls, from_email=from_email, from_name=from_name)
 
     def read_participants(self):
         with open(self.args.participants) as participants_file:
