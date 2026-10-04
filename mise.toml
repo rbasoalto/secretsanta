@@ -1,0 +1,7 @@
+[tools]
+python = "3.14"
+uv = "latest"
+
+[tasks.secretsanta]
+description = "Shuffle and send Secret Santa emails (extra args are forwarded, e.g. -n -p participants.json)"
+run = "uv run secretsanta.py"

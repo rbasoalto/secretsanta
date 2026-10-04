@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
-import argparse
-import random
-import smtplib
 import json
+import random
+from pathlib import Path
+
+import typer
 
 from gmail import GMailAPIEmailSender
+
+app = typer.Typer(help="Secret Santa email shuffler and sender")
 
 
 class DummyEmailSender(object):
@@ -19,49 +22,28 @@ class DummyEmailSender(object):
         pass
 
     def send_mail(self, recipient, subject, body):
-        print(("Sending mail to %s with subject %s and body %s")%(recipient, subject, body))
+        print("Sending mail to %s with subject %s and body %s" % (recipient, subject, body))
 
 
 class SecretSanta(object):
-    def __init__(self):
-        self.email_sender = None
+    def __init__(self, participants_file: Path, template_file: Path, dry_run: bool):
+        self.email_sender = DummyEmailSender() if dry_run else GMailAPIEmailSender()
         self.participants = {}
         self.restrictions = {}
-        self.subject = None
-        self.body = None
-        self.args = self.parse_args()
-        self.init_email()
-        self.read_participants()
-        self.read_template()
+        self.read_participants(participants_file)
+        self.read_template(template_file)
 
-    @staticmethod
-    def parse_args():
-        parser = argparse.ArgumentParser()
-        parser.add_argument("-p", "--participants", help="JSON participants file. Refer to README for help",
-                            default="participants.json")
-        parser.add_argument("-t", "--template", help="Email template file. Refer to README for help",
-                            default="template.txt")
-        parser.add_argument("-n", "--dry_run", help="Dry run", default=False)
-        return parser.parse_args()
-
-    def init_email(self):
-        if self.args.dry_run:
-            self.email_sender = DummyEmailSender()
-        else:
-            self.email_sender = GMailAPIEmailSender()
-
-    def read_participants(self):
-        with open(self.args.participants) as participants_file:
-            raw_participants = json.load(participants_file)
+    def read_participants(self, participants_file: Path):
+        raw_participants = json.loads(participants_file.read_text())
         for group in raw_participants:
             for person in group:
                 self.participants[person['email']] = person
-                self.restrictions[person['email']] = list(map(lambda p: p['email'], group))
+                self.restrictions[person['email']] = [p['email'] for p in group]
 
-    def read_template(self):
-        with open(self.args.template) as templatefile:
-            self.subject = templatefile.readline().strip()
-            self.body = '\n'.join(map(lambda s: s.strip(), templatefile.readlines()))
+    def read_template(self, template_file: Path):
+        lines = template_file.read_text().splitlines()
+        self.subject = lines[0].strip()
+        self.body = '\n'.join(s.strip() for s in lines[1:])
 
     def get_shuffling(self):
         froms = list(self.participants.keys())
@@ -77,28 +59,40 @@ class SecretSanta(object):
         return True
 
     def render_subject(self, pair):
-        subject = self.subject
-        subject = subject.replace("{FROM_NAME}", self.participants[pair[0]]['name'])
-        subject = subject.replace("{FROM_EMAIL}", self.participants[pair[0]]['email'])
-        subject = subject.replace("{TO_NAME}", self.participants[pair[1]]['name'])
-        subject = subject.replace("{TO_EMAIL}", self.participants[pair[1]]['email'])
-        return subject
+        return (self.subject
+                .replace("{FROM_NAME}", self.participants[pair[0]]['name'])
+                .replace("{FROM_EMAIL}", self.participants[pair[0]]['email'])
+                .replace("{TO_NAME}", self.participants[pair[1]]['name'])
+                .replace("{TO_EMAIL}", self.participants[pair[1]]['email']))
 
     def render_body(self, pair):
-        body = self.body
-        body = body.replace("{FROM_NAME}", self.participants[pair[0]]['name'])
-        body = body.replace("{FROM_EMAIL}", self.participants[pair[0]]['email'])
-        body = body.replace("{TO_NAME}", self.participants[pair[1]]['name'])
-        body = body.replace("{TO_EMAIL}", self.participants[pair[1]]['email'])
-        return body
+        return (self.body
+                .replace("{FROM_NAME}", self.participants[pair[0]]['name'])
+                .replace("{FROM_EMAIL}", self.participants[pair[0]]['email'])
+                .replace("{TO_NAME}", self.participants[pair[1]]['name'])
+                .replace("{TO_EMAIL}", self.participants[pair[1]]['email']))
 
     def run(self):
         pairs = self.get_shuffling()
         with self.email_sender:
             for pair in pairs:
-                self.email_sender.send_mail(self.participants[pair[0]], self.render_subject(pair), self.render_body(pair))
+                self.email_sender.send_mail(self.participants[pair[0]],
+                                            self.render_subject(pair),
+                                            self.render_body(pair))
+
+
+@app.command()
+def main(
+    participants: Path = typer.Option("participants.json", "--participants", "-p",
+                                      help="JSON participants file. Refer to README for help",
+                                      exists=True, dir_okay=False),
+    template: Path = typer.Option("template.txt", "--template", "-t",
+                                  help="Email template file. Refer to README for help",
+                                  exists=True, dir_okay=False),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Dry run (no emails sent)"),
+):
+    SecretSanta(participants, template, dry_run).run()
 
 
 if __name__ == '__main__':
-    ss = SecretSanta()
-    ss.run()
+    app()
